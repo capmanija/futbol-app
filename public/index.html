@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Registro de Partidos (Frontend + API)</title>
+  <style>
+    :root{--bg:#0f172a;--card:#111827;--muted:#94a3b8;--text:#e5e7eb;--accent:#22c55e;--danger:#ef4444;--border:#1f2937}
+    *{box-sizing:border-box}body{margin:0;background:linear-gradient(135deg,#0b1022 0%,#111827 100%);color:var(--text);font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,Noto Sans,sans-serif}
+    .container{max-width:1100px;margin:40px auto;padding:0 16px}
+    .card{background:rgba(17,24,39,.7);backdrop-filter: blur(8px);border:1px solid var(--border);border-radius:16px;box-shadow:0 8px 30px rgba(0,0,0,.35)}
+    .header{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--border)}
+    h1{font-size:1.4rem;margin:0}
+    .grid{display:grid;gap:14px}
+    @media(min-width:900px){.grid.cols-2{grid-template-columns:repeat(2,1fr)}.grid.cols-3{grid-template-columns:repeat(3,1fr)}}
+    label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:6px}
+    input,select{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:#0b1220;color:var(--text)}
+    input[type=number]{-moz-appearance:textfield;appearance:textfield}
+    .row{display:flex;gap:10px}
+    .btn{border:1px solid var(--border);background:#0b1220;color:var(--text);padding:10px 14px;border-radius:12px;cursor:pointer;transition:.2s}
+    .btn:hover{transform:translateY(-1px)}
+    .btn.primary{background:linear-gradient(135deg,#16a34a,#22c55e)}
+    .btn.ghost{background:#0b1220}
+    .btn.danger{background:linear-gradient(135deg,#b91c1c,#ef4444)}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    .content{padding:20px 24px}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:10px;border-bottom:1px solid var(--border);text-align:left;vertical-align:top}
+    th{font-weight:600;color:var(--muted);position:sticky;top:0;background:rgba(17,24,39,.9)}
+    .pill{display:inline-block;padding:2px 8px;border-radius:999px;background:#0b1220;border:1px solid var(--border)}
+    .toolbar{display:flex;gap:10px;flex-wrap:wrap}
+    .muted{color:var(--muted);font-size:.9rem}
+    .tag{font-size:.8rem;color:var(--muted)}
+    .footer{padding:14px 24px;border-top:1px solid var(--border);display:flex;justify-content:space-between;flex-wrap:wrap;gap:10px}
+    .empty{border:1px dashed var(--border);border-radius:12px;padding:20px;text-align:center;color:var(--muted)}
+    .subcard{border:1px dashed var(--border);padding:12px;border-radius:12px}
+    .mini-row{display:grid;grid-template-columns:1fr 130px auto auto;gap:8px;align-items:end}
+    .mini-row.cards{grid-template-columns:1fr 100px 120px auto}
+    .mini-title{font-size:.9rem;color:var(--muted);margin:6px 0}
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="card">
+      <div class="header">
+        <h1>📋 Registro de Partidos (Frontend + API)</h1>
+        <div class="toolbar">
+          <button id="exportBtn" class="btn">Exportar JSON</button>
+          <label for="importFile" class="btn ghost" style="display:inline-flex;align-items:center;gap:8px;cursor:pointer">Importar JSON<input id="importFile" type="file" accept="application/json" hidden></label>
+          <button id="clearBtn" class="btn danger">Vaciar todo (API)</button>
+        </div>
+      </div>
+      <div class="content">
+        <form id="matchForm" class="grid cols-3" autocomplete="off">
+          <input type="hidden" id="matchId" />
+          <div>
+            <label for="equipoLocal">Equipo Local</label>
+            <input id="equipoLocal" required placeholder="Ej: Boca Juniors" />
+          </div>
+          <div>
+            <label for="equipoVisitante">Equipo Visitante</label>
+            <input id="equipoVisitante" required placeholder="Ej: River Plate" />
+          </div>
+          <div>
+            <label for="cancha">Cancha</label>
+            <input id="cancha" required placeholder="Ej: La Bombonera" />
+          </div>
+          <div>
+            <label for="golesLoc">Goles Favor (Local)</label>
+            <input id="golesLoc" type="number" min="0" step="1" required placeholder="0" />
+          </div>
+          <div>
+            <label for="golesVis">Goles Favor (Visitante)</label>
+            <input id="golesVis" type="number" min="0" step="1" required placeholder="0" />
+          </div>
+          <div>
+            <label for="fecha">Fecha</label>
+            <input id="fecha" type="date" required />
+          </div>
+          <div>
+            <label for="hora">Hora</label>
+            <input id="hora" type="time" required />
+          </div>
+        </form>
+
+        <!-- Goles -->
+        <div class="grid cols-2" style="margin-top:16px">
+          <div class="subcard" id="golesLocalWrap">
+            <div class="mini-title">Goles - Local</div>
+            <div id="golesLocal"></div>
+            <button class="btn" id="addGolLocal">+ Agregar gol (Local)</button>
+          </div>
+          <div class="subcard" id="golesVisitanteWrap">
+            <div class="mini-title">Goles - Visitante</div>
+            <div id="golesVisitante"></div>
+            <button class="btn" id="addGolVisitante">+ Agregar gol (Visitante)</button>
+          </div>
+        </div>
+
+        <!-- Tarjetas -->
+        <div class="grid cols-2" style="margin-top:16px">
+          <div class="subcard" id="cardsLocalWrap">
+            <div class="mini-title">Amonestaciones - Local</div>
+            <div id="cardsLocal"></div>
+            <button class="btn" id="addCardLocal">+ Agregar tarjeta (Local)</button>
+          </div>
+          <div class="subcard" id="cardsVisitanteWrap">
+            <div class="mini-title">Amonestaciones - Visitante</div>
+            <div id="cardsVisitante"></div>
+            <button class="btn" id="addCardVisitante">+ Agregar tarjeta (Visitante)</button>
+          </div>
+        </div>
+
+        <div class="row" style="align-items:center;justify-content:space-between;margin:16px 0">
+          <div class="row" style="gap:10px">
+            <button class="btn primary" id="saveBtn">Guardar / Actualizar (API)</button>
+            <button class="btn ghost" id="resetBtn">Limpiar</button>
+          </div>
+          <div class="row" style="gap:10px">
+            <input id="search" placeholder="Buscar por equipo o cancha…" style="min-width:260px" />
+            <select id="sortBy">
+              <option value="fechaDesc">Fecha ↓</option>
+              <option value="fechaAsc">Fecha ↑</option>
+              <option value="equipo">Equipo (A→Z)</option>
+              <option value="cancha">Cancha (A→Z)</option>
+            </select>
+          </div>
+          <span class="tag" id="count"></span>
+        </div>
+
+        <div id="tableWrap" class="card" style="background:transparent;border:none;box-shadow:none">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Hora</th>
+                <th>Local</th>
+                <th>Visitante</th>
+                <th>Marcador</th>
+                <th>Cancha</th>
+                <th>Goles</th>
+                <th>Tarjetas</th>
+                <th style="width:140px">Acciones</th>
+              </tr>
+            </thead>
+            <tbody id="tbody"></tbody>
+          </table>
+          <div id="empty" class="empty" style="display:none;margin-top:12px">No hay partidos aún. Cargá el primero arriba ☝️</div>
+        </div>
+      </div>
+      <div class="footer">
+        <div class="muted">Frontend listo para API REST (mismo origen).</div>
+        <div class="muted">Nuevos campos: goleadores (jugador+minuto, penal/EC) y tarjetas (jugador+minuto+tipo).</div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+  // ===== Config =====
+  const API_BASE = ''; // mismo origen, por ej. "/api" ya está incluido en las rutas de fetch
+
+  // ===== Helpers UI =====
+  const el = (tag, attrs={}, children=[])=>{ const n=document.createElement(tag); Object.entries(attrs).forEach(([k,v])=> k==='class'? n.className=v : n.setAttribute(k,v)); children.forEach(c=> n.appendChild(typeof c==='string'? document.createTextNode(c): c)); return n; }
+  const pill = (t)=>`<span class="pill">${t}</span>`;
+
+  function addGolRow(container){
+    const row = el('div',{class:'mini-row'} , [
+      el('input',{placeholder:'Jugador', 'data-field':'jugador'}),
+      el('input',{type:'number', min:'0', step:'1', placeholder:'Min', 'data-field':'minuto'}),
+      el('label',{},[el('input',{type:'checkbox','data-field':'penalty'}), document.createTextNode(' Penal')]),
+      el('label',{},[el('input',{type:'checkbox','data-field':'ec'}), document.createTextNode(' En contra')]),
+      el('button',{class:'btn danger', type:'button'},[document.createTextNode('Eliminar')])
+    ]);
+    row.querySelector('button').onclick=()=> row.remove();
+    container.appendChild(row);
+  }
+  function addCardRow(container){
+    const row = el('div',{class:'mini-row cards'} , [
+      el('input',{placeholder:'Jugador', 'data-field':'jugador'}),
+      el('input',{type:'number', min:'0', step:'1', placeholder:'Min', 'data-field':'minuto'}),
+      (function(){ const s=el('select',{'data-field':'tipo'}); ['amarilla','roja'].forEach(v=>{ const o=el('option'); o.value=v; o.textContent=v; s.appendChild(o);}); return s;})(),
+      el('button',{class:'btn danger', type:'button'},[document.createTextNode('Eliminar')])
+    ]);
+    row.querySelector('button').onclick=()=> row.remove();
+    container.appendChild(row);
+  }
+
+  // ===== Form / DOM =====
+  const fields = {
+    id: document.getElementById('matchId'),
+    Equipo_Local: document.getElementById('equipoLocal'),
+    Equipo_Visitante: document.getElementById('equipoVisitante'),
+    Goles_favor_loc: document.getElementById('golesLoc'),
+    Goles_favor_vis: document.getElementById('golesVis'),
+    Cancha: document.getElementById('cancha'),
+    Fecha: document.getElementById('fecha'),
+    Hora: document.getElementById('hora')
+  };
+  const golesLocalC = document.getElementById('golesLocal');
+  const golesVisitanteC = document.getElementById('golesVisitante');
+  const cardsLocalC = document.getElementById('cardsLocal');
+  const cardsVisitanteC = document.getElementById('cardsVisitante');
+  const tbody = document.getElementById('tbody');
+  const empty = document.getElementById('empty');
+  const count = document.getElementById('count');
+  const sortBy = document.getElementById('sortBy');
+  const search = document.getElementById('search');
+
+  document.getElementById('addGolLocal').onclick=()=>addGolRow(golesLocalC);
+  document.getElementById('addGolVisitante').onclick=()=>addGolRow(golesVisitanteC);
+  document.getElementById('addCardLocal').onclick=()=>addCardRow(cardsLocalC);
+  document.getElementById('addCardVisitante').onclick=()=>addCardRow(cardsVisitanteC);
+
+  function serializeRows(container, map){
+    const arr=[]; container.querySelectorAll('.mini-row').forEach(r=>{
+      const get = (sel)=> r.querySelector(`[data-field="${sel}"]`);
+      const jugador = get('jugador').value.trim();
+      const minuto = Number(get('minuto').value||0);
+      if(!jugador) return; // ignorar vacíos
+      const obj = map({jugador, minuto, r});
+      arr.push(obj);
+    });
+    return arr;
+  }
+
+  function clearDynamic(){ golesLocalC.innerHTML=''; golesVisitanteC.innerHTML=''; cardsLocalC.innerHTML=''; cardsVisitanteC.innerHTML=''; }
+
+  function fillDynamic(match){
+    clearDynamic();
+    (match.goles||[]).filter(g=>g.team==='local').forEach(()=>addGolRow(golesLocalC));
+    Array.from(golesLocalC.children).forEach((row,i)=>{
+      const g = match.goles.filter(x=>x.team==='local')[i]; if(!g) return;
+      row.querySelector('[data-field="jugador"]').value=g.jugador;
+      row.querySelector('[data-field="minuto"]').value=g.minuto;
+      row.querySelector('[data-field="penalty"]').checked=!!g.penalty;
+      row.querySelector('[data-field="ec"]').checked=!!g.own_goal;
+    });
+    (match.goles||[]).filter(g=>g.team==='visitante').forEach(()=>addGolRow(golesVisitanteC));
+    Array.from(golesVisitanteC.children).forEach((row,i)=>{
+      const g = match.goles.filter(x=>x.team==='visitante')[i]; if(!g) return;
+      row.querySelector('[data-field="jugador"]').value=g.jugador;
+      row.querySelector('[data-field="minuto"]').value=g.minuto;
+      row.querySelector('[data-field="penalty"]').checked=!!g.penalty;
+      row.querySelector('[data-field="ec"]').checked=!!g.own_goal;
+    });
+    (match.tarjetas||[]).filter(c=>c.team==='local').forEach(()=>addCardRow(cardsLocalC));
+    Array.from(cardsLocalC.children).forEach((row,i)=>{
+      const c = match.tarjetas.filter(x=>x.team==='local')[i]; if(!c) return;
+      row.querySelector('[data-field="jugador"]').value=c.jugador;
+      row.querySelector('[data-field="minuto"]').value=c.minuto;
+      row.querySelector('[data-field="tipo"]').value=c.tipo;
+    });
+    (match.tarjetas||[]).filter(c=>c.team==='visitante').forEach(()=>addCardRow(cardsVisitanteC));
+    Array.from(cardsVisitanteC.children).forEach((row,i)=>{
+      const c = match.tarjetas.filter(x=>x.team==='visitante')[i]; if(!c) return;
+      row.querySelector('[data-field="jugador"]').value=c.jugador;
+      row.querySelector('[data-field="minuto"]').value=c.minuto;
+      row.querySelector('[data-field="tipo"]').value=c.tipo;
+    });
+  }
+
+  function formToPayload(){
+    const goles = [
+      ...serializeRows(golesLocalC, ({jugador,minuto,r})=>({team:'local', jugador, minuto, penalty: r.querySelector('[data-field="penalty"]').checked, own_goal: r.querySelector('[data-field="ec"]').checked})),
+      ...serializeRows(golesVisitanteC, ({jugador,minuto,r})=>({team:'visitante', jugador, minuto, penalty: r.querySelector('[data-field="penalty"]').checked, own_goal: r.querySelector('[data-field="ec"]').checked}))
+    ];
+    const tarjetas = [
+      ...serializeRows(cardsLocalC, ({jugador,minuto,r})=>({team:'local', jugador, minuto, tipo: r.querySelector('[data-field="tipo"]').value})),
+      ...serializeRows(cardsVisitanteC, ({jugador,minuto,r})=>({team:'visitante', jugador, minuto, tipo: r.querySelector('[data-field="tipo"]').value}))
+    ];
+    return {
+      id: fields.id.value? Number(fields.id.value): undefined,
+      equipo_local: fields.Equipo_Local.value.trim(),
+      equipo_visitante: fields.Equipo_Visitante.value.trim(),
+      goles_favor_loc: Number(fields.Goles_favor_loc.value||0),
+      goles_favor_vis: Number(fields.Goles_favor_vis.value||0),
+      cancha: fields.Cancha.value.trim(),
+      fecha: fields.Fecha.value,
+      hora: fields.Hora.value,
+      goles, tarjetas
+    };
+  }
+
+  function fillForm(match){
+    fields.id.value = match.id || '';
+    fields.Equipo_Local.value = match.equipo_local;
+    fields.Equipo_Visitante.value = match.equipo_visitante;
+    fields.Goles_favor_loc.value = match.goles_favor_loc;
+    fields.Goles_favor_vis.value = match.goles_favor_vis;
+    fields.Cancha.value = match.cancha;
+    fields.Fecha.value = match.fecha;
+    fields.Hora.value = match.hora;
+    fillDynamic(match);
+    document.getElementById('saveBtn').textContent = match.id? 'Actualizar (API)' : 'Guardar (API)';
+  }
+
+  function resetForm(){
+    document.getElementById('matchForm').reset();
+    fields.id.value='';
+    clearDynamic();
+    document.getElementById('saveBtn').textContent = 'Guardar / Actualizar (API)';
+  }
+
+  function formatFecha(fecha){ if(!fecha) return ''; const [y,m,d]=fecha.split('-'); return `${d}/${m}/${y}`; }
+
+  // ===== API =====
+  async function api(path, opts){
+    const res = await fetch(`${API_BASE}/api${path}`, {headers:{'Content-Type':'application/json'}, ...opts});
+    if(!res.ok) throw new Error(await res.text());
+    return res.json();
+  }
+
+  let data = [];
+  async function load(){ data = await api('/matches'); render(); }
+
+  // ===== Render =====
+  const tbodyEl = document.getElementById('tbody');
+  function render(){
+    const q = search.value.trim().toLowerCase();
+    let rows = data.filter(p=>[
+      p.equipo_local.toLowerCase(),
+      p.equipo_visitante.toLowerCase(),
+      p.cancha.toLowerCase(),
+      `${p.equipo_local} vs ${p.equipo_visitante}`.toLowerCase()
+    ].some(s=>s.includes(q)));
+
+    switch(sortBy.value){
+      case 'fechaAsc': rows.sort((a,b)=> (a.fecha+a.hora).localeCompare(b.fecha+b.hora)); break;
+      case 'equipo': rows.sort((a,b)=> (a.equipo_local+a.equipo_visitante).localeCompare(b.equipo_local+b.equipo_visitante)); break;
+      case 'cancha': rows.sort((a,b)=> a.cancha.localeCompare(b.cancha)); break;
+      default: rows.sort((a,b)=> (b.fecha+b.hora).localeCompare(a.fecha+a.hora));
+    }
+
+    tbodyEl.innerHTML='';
+    if(rows.length===0){ empty.style.display='block'; } else { empty.style.display='none'; }
+
+    rows.forEach(p=>{
+      const golesTxt = (p.goles||[]).map(g=> `${g.team==='local'? 'L':'V'}: ${g.jugador} ${pill(g.minuto+'\'')}${g.penalty? ' (P)':''}${g.own_goal? ' (EC)':''}`).join('<br/>');
+      const cardsTxt = (p.tarjetas||[]).map(c=> `${c.team==='local'? 'L':'V'}: ${c.jugador} ${pill(c.minuto+'\'')} - ${c.tipo}`).join('<br/>');
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${pill(formatFecha(p.fecha))}</td>
+        <td>${p.hora}</td>
+        <td>${p.equipo_local}</td>
+        <td>${p.equipo_visitante}</td>
+        <td><strong>${p.goles_favor_loc} - ${p.goles_favor_vis}</strong></td>
+        <td>${p.cancha}</td>
+        <td>${golesTxt||'<span class="tag">—</span>'}</td>
+        <td>${cardsTxt||'<span class="tag">—</span>'}</td>
+        <td>
+          <button class="btn" data-edit="${p.id}">Editar</button>
+          <button class="btn danger" data-del="${p.id}">Borrar</button>
+        </td>
+      `;
+      tbodyEl.appendChild(tr);
+    });
+    count.textContent = `${rows.length} partido(s)`;
+  }
+
+  // ===== Eventos =====
+  document.getElementById('saveBtn').addEventListener('click', async ()=>{
+    const payload = formToPayload();
+    if(!payload.equipo_local||!payload.equipo_visitante||!payload.cancha||!payload.fecha||!payload.hora){
+      alert('Completá todos los campos básicos.'); return;
+    }
+    try{
+      if(payload.id){ await api(`/matches/${payload.id}`, {method:'PUT', body: JSON.stringify(payload)}); }
+      else { await api('/matches', {method:'POST', body: JSON.stringify(payload)}); }
+      resetForm();
+      await load();
+    }catch(err){ alert('No se pudo guardar: '+err.message); }
+  });
+
+  document.getElementById('resetBtn').addEventListener('click', resetForm);
+
+  document.getElementById('clearBtn').addEventListener('click', async ()=>{
+    if(!confirm('¿Vaciar TODOS los partidos de la base?')) return;
+    const all = await api('/matches');
+    for(const m of all){ await api(`/matches/${m.id}`, {method:'DELETE'}); }
+    await load();
+  });
+
+  document.getElementById('exportBtn').addEventListener('click', async ()=>{
+    const all = await api('/matches');
+    const blob = new Blob([JSON.stringify(all, null, 2)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href=url; a.download='partidos.json'; a.click(); URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('importFile').addEventListener('change', async (e)=>{
+    const file = e.target.files[0]; if(!file) return;
+    try{
+      const text = await file.text(); const arr = JSON.parse(text);
+      if(!Array.isArray(arr)) throw new Error('Formato inválido');
+      // Cargar secuencial
+      const all = await api('/matches');
+      for(const m of all){ await api(`/matches/${m.id}`, {method:'DELETE'}); }
+      for(const o of arr){ await api('/matches', {method:'POST', body: JSON.stringify(o)}); }
+      await load(); alert('Importación exitosa');
+    }catch(err){ alert('No se pudo importar: '+err.message); }
+    finally{ e.target.value=''; }
+  });
+
+  document.getElementById('tbody').addEventListener('click', async (e)=>{
+    const btn = e.target.closest('button'); if(!btn) return;
+    const id = Number(btn.dataset.edit || btn.dataset.del);
+    if(btn.dataset.edit){
+      const m = (await api(`/matches/${id}`)); fillForm(m);
+    } else if(btn.dataset.del){
+      if(confirm('¿Eliminar partido?')){ await api(`/matches/${id}`, {method:'DELETE'}); await load(); }
+    }
+  });
+
+  sortBy.addEventListener('change', render);
+  search.addEventListener('input', render);
+
+  // Defaults de fecha/hora
+  (function initDefaults(){
+    const now = new Date(); const pad = n=> String(n).padStart(2,'0');
+    document.getElementById('fecha').value = `${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}`;
+    document.getElementById('hora').value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  })();
+
+  load();
+  </script>
+</body>
+</html>
