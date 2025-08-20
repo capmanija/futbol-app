@@ -6,18 +6,19 @@ import path from "node:path";
 import fs from "node:fs";
 
 const PORT = process.env.PORT || 3000;
-const DATABASE_URL = process.env.DATABASE_URL; // ej: postgresql://user:pass@host/db?sslmode=require
+const DATABASE_URL = process.env.DATABASE_URL;
+
 if (!DATABASE_URL) {
   console.error("Falta la variable de entorno DATABASE_URL");
   process.exit(1);
 }
 
+// Forzar SSL compatible con Neon/Supabase
 const pool = new Pool({
   connectionString: DATABASE_URL,
-  ssl: { rejectUnauthorized: false }, // Neon/Supabase suelen requerir SSL
+  ssl: { rejectUnauthorized: false }, // importante para Neon
 });
 
-// ----- Crear tablas si no existen -----
 async function ensureSchema() {
   const sql = `
   CREATE TABLE IF NOT EXISTS matches (
@@ -27,11 +28,10 @@ async function ensureSchema() {
     goles_favor_loc INTEGER NOT NULL DEFAULT 0,
     goles_favor_vis INTEGER NOT NULL DEFAULT 0,
     cancha TEXT NOT NULL,
-    fecha TEXT NOT NULL, -- YYYY-MM-DD
-    hora TEXT NOT NULL,  -- HH:mm
+    fecha TEXT NOT NULL,
+    hora TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
   );
-
   CREATE TABLE IF NOT EXISTS goals (
     id SERIAL PRIMARY KEY,
     match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
@@ -41,7 +41,6 @@ async function ensureSchema() {
     penalty BOOLEAN NOT NULL DEFAULT false,
     own_goal BOOLEAN NOT NULL DEFAULT false
   );
-
   CREATE TABLE IF NOT EXISTS cards (
     id SERIAL PRIMARY KEY,
     match_id INTEGER NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
@@ -54,6 +53,42 @@ async function ensureSchema() {
   await pool.query(sql);
 }
 
+// ---- diagnóstico de arranque ----
+try {
+  console.log("Probando conexión a la base...");
+  const client = await pool.connect();
+  await client.query("SELECT 1");
+  client.release();
+  console.log("✅ Conexión OK");
+} catch (e) {
+  console.error("❌ Error conectando a Postgres:");
+  console.error(e?.message || e);
+  console.error(e?.stack);
+  process.exit(1); // paramos acá para ver el error en logs
+}
+
+const app = express();
+app.use(cors());
+app.use(express.json({ limit: "1mb" }));
+app.use(morgan("dev"));
+
+const publicDir = path.join(process.cwd(), "public");
+if (fs.existsSync(publicDir)) app.use(express.static(publicDir));
+
+// health básico
+app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+// health de DB (para probar desde el navegador)
+app.get("/api/health/db", async (req, res) => {
+  try {
+    const r = await pool.query("SELECT now()");
+    res.json({ ok: true, now: r.rows[0].now });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
+// helpers y rutas (idénticas a las que ya tenías)...
 function mapMatch(row) {
   return {
     id: row.id,
@@ -66,7 +101,6 @@ function mapMatch(row) {
     hora: row.hora,
   };
 }
-
 function validateMatch(p) {
   const required = ["equipo_local", "equipo_visitante", "cancha", "fecha", "hora"];
   for (const k of required) if (!p?.[k]) return `Falta: ${k}`;
@@ -87,7 +121,6 @@ function validateMatch(p) {
   }
   return null;
 }
-
 async function fetchDetails(matchId) {
   const goals = (await pool.query(
     "SELECT * FROM goals WHERE match_id = $1 ORDER BY minuto, id",
@@ -105,25 +138,11 @@ async function fetchDetails(matchId) {
   return { goals, cards };
 }
 
-const app = express();
-app.use(cors());
-app.use(express.json({ limit: "1mb" }));
-app.use(morgan("dev"));
-
-// Servir frontend si existe /public
-const publicDir = path.join(process.cwd(), "public");
-if (fs.existsSync(publicDir)) app.use(express.static(publicDir));
-
-// Health
-app.get("/api/health", (req, res) => res.json({ ok: true }));
-
-// Listar partidos (resumen)
 app.get("/api/matches", async (req, res, next) => {
   try {
     const rows = (await pool.query(
       "SELECT * FROM matches ORDER BY fecha DESC, hora DESC, id DESC"
     )).rows;
-    // Opcional: contadores (rápido)
     const results = await Promise.all(rows.map(async (r) => {
       const gc = (await pool.query("SELECT COUNT(1) c FROM goals WHERE match_id=$1", [r.id])).rows[0].c;
       const cc = (await pool.query("SELECT COUNT(1) c FROM cards WHERE match_id=$1", [r.id])).rows[0].c;
@@ -133,7 +152,6 @@ app.get("/api/matches", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Obtener un partido (con detalles)
 app.get("/api/matches/:id", async (req, res, next) => {
   try {
     const { rows } = await pool.query("SELECT * FROM matches WHERE id=$1", [req.params.id]);
@@ -144,12 +162,10 @@ app.get("/api/matches/:id", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Crear partido
 app.post("/api/matches", async (req, res, next) => {
   try {
     const err = validateMatch(req.body);
     if (err) return res.status(400).json({ error: err });
-
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
@@ -157,17 +173,12 @@ app.post("/api/matches", async (req, res, next) => {
         `INSERT INTO matches (equipo_local, equipo_visitante, goles_favor_loc, goles_favor_vis, cancha, fecha, hora)
          VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id`,
         [
-          req.body.equipo_local,
-          req.body.equipo_visitante,
-          req.body.goles_favor_loc ?? 0,
-          req.body.goles_favor_vis ?? 0,
-          req.body.cancha,
-          req.body.fecha,
-          req.body.hora,
+          req.body.equipo_local, req.body.equipo_visitante,
+          req.body.goles_favor_loc ?? 0, req.body.goles_favor_vis ?? 0,
+          req.body.cancha, req.body.fecha, req.body.hora,
         ]
       );
       const id = ins.rows[0].id;
-
       for (const g of req.body.goles || []) {
         await client.query(
           `INSERT INTO goals (match_id, team, jugador, minuto, penalty, own_goal)
@@ -183,25 +194,18 @@ app.post("/api/matches", async (req, res, next) => {
         );
       }
       await client.query("COMMIT");
-
       const match = (await pool.query("SELECT * FROM matches WHERE id=$1", [id])).rows[0];
       const { goals, cards } = await fetchDetails(id);
       res.status(201).json({ ...mapMatch(match), goles: goals, tarjetas: cards });
-    } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
-    } finally {
-      client.release();
-    }
+    } catch (e) { await client.query("ROLLBACK"); throw e; }
+    finally { client.release(); }
   } catch (e) { next(e); }
 });
 
-// Actualizar partido
 app.put("/api/matches/:id", async (req, res, next) => {
   try {
     const err = validateMatch(req.body);
     if (err) return res.status(400).json({ error: err });
-
     const id = Number(req.params.id);
     const client = await pool.connect();
     try {
@@ -220,7 +224,6 @@ app.put("/api/matches/:id", async (req, res, next) => {
       );
       await client.query("DELETE FROM goals WHERE match_id=$1", [id]);
       await client.query("DELETE FROM cards WHERE match_id=$1", [id]);
-
       for (const g of req.body.goles || []) {
         await client.query(
           `INSERT INTO goals (match_id, team, jugador, minuto, penalty, own_goal)
@@ -236,20 +239,14 @@ app.put("/api/matches/:id", async (req, res, next) => {
         );
       }
       await client.query("COMMIT");
-
       const match = (await pool.query("SELECT * FROM matches WHERE id=$1", [id])).rows[0];
       const { goals, cards } = await fetchDetails(id);
       res.json({ ...mapMatch(match), goles: goals, tarjetas: cards });
-    } catch (e) {
-      await client.query("ROLLBACK");
-      throw e;
-    } finally {
-      client.release();
-    }
+    } catch (e) { await client.query("ROLLBACK"); throw e; }
+    finally { client.release(); }
   } catch (e) { next(e); }
 });
 
-// Borrar partido
 app.delete("/api/matches/:id", async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -259,9 +256,8 @@ app.delete("/api/matches/:id", async (req, res, next) => {
   } catch (e) { next(e); }
 });
 
-// Errores
 app.use((err, req, res, next) => {
-  console.error(err);
+  console.error("Middleware de error:", err?.message || err);
   res.status(500).json({ error: "server_error", detail: String(err?.message || err) });
 });
 
@@ -269,7 +265,5 @@ await ensureSchema();
 
 app.listen(PORT, () => {
   console.log(`API lista en http://localhost:${PORT}`);
-  if (fs.existsSync(publicDir)) {
-    console.log(`Frontend servido en http://localhost:${PORT}`);
-  }
+  if (fs.existsSync(publicDir)) console.log(`Frontend servido en http://localhost:${PORT}`);
 });
